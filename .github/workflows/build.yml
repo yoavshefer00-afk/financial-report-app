@@ -1,6 +1,6 @@
 name: Windows app
 
-# Builds the installer when a version tag is pushed (v1.0.0, ...), and attaches it to a release.
+# Builds the installer when run by hand (or when a version tag is pushed) and attaches it to a release.
 # The page itself (index.html) is updated by a plain push and reaches the installed apps by itself.
 on:
   push:
@@ -35,8 +35,10 @@ jobs:
           name: FinancialReport-Setup
           path: dist/FinancialReport-Setup.exe
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" dist/FinancialReport-Setup.exe --title "${{ github.ref_name }}" --notes "Installer of the financial report app" --latest
+        run: |
+          tag="${{ github.ref_name }}"
+          if [ "${{ github.ref_type }}" != "tag" ]; then tag="app-${{ github.run_number }}"; fi
+          gh release create "$tag" dist/FinancialReport-Setup.exe --target "${{ github.sha }}" --title "$tag" --notes "Installer of the financial report app" --latest
