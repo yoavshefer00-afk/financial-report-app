@@ -1,0 +1,24 @@
+{
+  "name": "financial-report-app",
+  "version": "1.0.0",
+  "description": "Desktop app of the financial report generator",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "dist": "electron-builder --win"
+  },
+  "build": {
+    "appId": "il.financial-report",
+    "productName": "Financial Report",
+    "files": ["main.js", "update.js", "index.html"],
+    "win": {"target": "nsis"},
+    "nsis": {"oneClick": true, "perMachine": false, "artifactName": "FinancialReport-Setup.exe"},
+    "publish": null
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  }
+}
