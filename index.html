@@ -108,6 +108,7 @@ summary { cursor: pointer; font-weight: 500; }
 .map .mine { color: var(--accent); }
 .assign { background: var(--surface); border: 1px solid var(--line); border-inline-start: 4px solid var(--unsorted);
   border-radius: 8px; padding: 14px 16px; display: grid; gap: 10px; }
+.warn { background: var(--unsorted); color: var(--ink); border-radius: 6px; padding: 8px 12px; font-size: .9rem; }
 .assign h3 { margin: 0; font-size: 1rem; }
 .assign-list { display: grid; gap: 8px; }
 .assign-row { display: grid; grid-template-columns: 7.5em minmax(0, 1fr) minmax(12em, 16em); gap: 4px 14px; align-items: center;
@@ -156,6 +157,7 @@ summary { cursor: pointer; font-weight: 500; }
         <label class="mode"><input type="radio" name="head" id="head-no" value="no" checked> לא</label>
       </div>
       <span class="hint">כן: סעיף 5000105 נכנס ל"תוספת תפקיד לראש המרכז". לא: לשכר אקדמי. התשובה נשמרת לכל מרכז בנפרד.</span>
+      <div class="warn" id="head-warning" role="status" hidden></div>
     </div>
 
     <div class="drop" id="drop">
@@ -186,7 +188,7 @@ summary { cursor: pointer; font-weight: 500; }
     <p class="hint" style="margin-top:10px">סעיף שאינו ברשימה מסומן בצהוב, ומעל הדוח אפשר לבחור לו שורה. סעיפים שמתחילים ב-7 לא נכנסים לדוח. הסכומים הם "סה"כ ביצוע": בפועל ועוד התחייבויות פתוחות (דרישות רכש, הזמנות רכש ושריונים שעוד לא מומשו), כמו בדוח התקציב של SAP. בפועל נספרים רישומים בפועל (סוג ערך 99), חיובים פנימיים (תקורה, תקורת קמפיין, דמי תקשוב, העברה פנימית לשכר, שירותים פנימיים של האוניברסיטה, החזרי מילואים וטלפוניה) והוצאות שהועברו למענק ("העברת הוצאות"). הסבות מענקים בסוף השנה לא נספרות.</p>
   </details>
   <div class="actions" style="margin-top:24px">
-    <span class="hint" id="version">גרסת הדף: 2026-11-01 12:53 UTC · 68fb246</span>
+    <span class="hint" id="version">גרסת הדף: 2026-11-01 13:04 UTC · a33f238</span>
     <span id="update-box" class="actions" hidden>
       <button type="button" id="update-check">בדיקת עדכון</button>
       <span class="hint" id="update-status" role="status"></span>
@@ -631,9 +633,13 @@ happens on the viewer's computer; no file is sent anywhere.
     return transactions;
   }
 
-  async function listGrants(filename, data, template = DEFAULT_TEMPLATE) {
-    const grants = new Set((await readTransactions(filename, data, template)).map(t => t.grant).filter(Boolean));
-    return [...grants].sort();
+  /** What the page needs from a file before the report: its grants, and the head of the center's supplement
+   * (budget item 5000105), which goes to the academic salary unless the center pays that supplement. */
+  async function inspect(filename, data, template = DEFAULT_TEMPLATE) {
+    const transactions = await readTransactions(filename, data, template);
+    const head = transactions.filter(t => t.item === "5000105" && !t.commitment && !t.paper);
+    return {grants: [...new Set(transactions.map(t => t.grant).filter(Boolean))].sort(),
+            head: {count: head.length, total: 0 - head.reduce((sum, t) => sum + t.amount, 0) + 0}};
   }
 
   function onlyGrants(transactions, grants, filename) {
@@ -1152,7 +1158,7 @@ happens on the viewer's computer; no file is sent anywhere.
     return center && name.endsWith(".xlsx") ? `${name.slice(0, -5)} - ${center.slice(0, 40)}.xlsx` : name;
   }
 
-  return {DEFAULT_TEMPLATE, ReportError, readTransactions, listGrants, parseAmount, parseDate, budgetYear,
+  return {DEFAULT_TEMPLATE, ReportError, readTransactions, inspect, parseAmount, parseDate, budgetYear,
           yearDates, itemNames, makeReport, makeMultiyearReport, writeWorkbook, withCenter, withHeadSupplement,
           fileNameWithCenter};
 });
@@ -1278,10 +1284,13 @@ async function refreshGrants() {
   for (const f of files) {
     if (f.grants) continue;
     try {
-      f.grants = await Report.listGrants(f.name, f.data);
+      const found = await Report.inspect(f.name, f.data);
+      f.grants = found.grants;
+      f.head = found.head;
       f.error = "";
     } catch (e) {
       f.grants = [];
+      f.head = {count: 0, total: 0};
       f.error = e.message;
     }
   }
@@ -1293,7 +1302,19 @@ async function refreshGrants() {
     : files.length ? "לא נמצאה עמודת מענק בקובץ, הדוח יהיה על הכל." : "יופיעו כאן אחרי בחירת קובץ.";
 }
 
+// In a file with budget item 5000105 and the answer "no" to the head's supplement, remind what that means.
+function renderHeadWarning() {
+  const found = files.reduce((sum, f) => ({count: sum.count + ((f.head || {}).count || 0),
+                                           total: sum.total + ((f.head || {}).total || 0)}), {count: 0, total: 0});
+  const no = document.querySelector('input[name="head"]:checked').value === "no";
+  $("head-warning").hidden = !(no && found.count);
+  $("head-warning").textContent = `בקובץ יש סעיף 5000105 (${found.count === 1 ? "תנועה אחת" : found.count + " תנועות"}, ` +
+    `${money(Math.abs(found.total))}). כשהתשובה "לא", הוא נספר ב"שכר אקדמי". אם במרכז משולמת תוספת שכר לראש המרכז, ` +
+    `סמן "כן".`;
+}
+
 function renderFiles() {
+  renderHeadWarning();
   const multi = mode() === "multi";
   $("choose").textContent = multi ? "הוספת קבצים מה-SAP…" : "בחירת קובץ מה-SAP…";
   $("file").multiple = multi;
@@ -1334,9 +1355,10 @@ $("center").value = store.get("center");
 const headKey = () => "head:" + $("center").value.trim();
 function loadHead() { $(store.get(headKey()) === "yes" ? "head-yes" : "head-no").checked = true; }
 loadHead();
-$("center").addEventListener("change", () => { store.set("center", $("center").value.trim()); loadHead(); });
+$("center").addEventListener("change", () => { store.set("center", $("center").value.trim()); loadHead(); renderHeadWarning(); });
 document.querySelectorAll('input[name="head"]').forEach(r => r.addEventListener("change", () => {
   store.set(headKey(), document.querySelector('input[name="head"]:checked').value);
+  renderHeadWarning();
 }));
 
 // --- the report ---
