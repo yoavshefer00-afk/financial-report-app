@@ -188,7 +188,7 @@ summary { cursor: pointer; font-weight: 500; }
     <p class="hint" style="margin-top:10px">סעיף שאינו ברשימה מסומן בצהוב, ומעל הדוח אפשר לבחור לו שורה. סעיפים שמתחילים ב-7 לא נכנסים לדוח. הסכומים הם "סה"כ ביצוע": בפועל ועוד התחייבויות פתוחות (דרישות רכש, הזמנות רכש ושריונים שעוד לא מומשו), כמו בדוח התקציב של SAP. בפועל נספרים רישומים בפועל (סוג ערך 99), חיובים פנימיים (תקורה, תקורת קמפיין, דמי תקשוב, העברה פנימית לשכר, שירותים פנימיים של האוניברסיטה, החזרי מילואים וטלפוניה) והוצאות שהועברו למענק ("העברת הוצאות"). הסבות מענקים בסוף השנה לא נספרות.</p>
   </details>
   <div class="actions" style="margin-top:24px">
-    <span class="hint" id="version">גרסת הדף: 2026-11-01 13:24 UTC · dd137af</span>
+    <span class="hint" id="version">גרסת הדף: 2026-11-01 13:30 UTC · 3d3653e</span>
     <span id="update-box" class="actions" hidden>
       <button type="button" id="update-check">בדיקת עדכון</button>
       <span class="hint" id="update-status" role="status"></span>
@@ -290,7 +290,8 @@ happens on the viewer's computer; no file is sent anywhere.
   // The rows of the center's annual budget form ("פירוט התקציב השנתי הנדרש ומקורות המימון"), in
   // its order. Expense rows with a "group" are listed under it with a subtotal.
   const DEFAULT_TEMPLATE = {
-    title: "פירוט התקציב השנתי ומקורות המימון",
+    title: 'דו"ח הכנסות והוצאות שנתי',
+    title_multiyear: 'דו"ח הכנסות והוצאות רב-שנתי',
     organization: "",
     income: [
       {name: "הכנסות מתרומות"},
@@ -908,7 +909,8 @@ happens on the viewer's computer; no file is sent anywhere.
   }
 
   const join = (...parts) => parts.filter(Boolean).join(". ");
-  const reportTitle = (template, years) => [template.title, template.organization || "", years].filter(Boolean)
+  const reportTitle = (template, years, multi = false) => [multi ? template.title_multiyear : template.title,
+    template.organization || "", years].filter(Boolean)
     .join(" – ");
   const pad = n => String(n).padStart(2, "0");
   const dateText = d => `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
@@ -940,7 +942,7 @@ happens on the viewer's computer; no file is sent anywhere.
     const all = new Totals(everything, template.item_notes, template.item_sources, template.source_names);
     return [
       {name: "רב שנתי", widths: [34, ...new Array(years.length + 1).fill(16), 34],
-       rows: [...titleRows(reportTitle(template, span), join(
+       rows: [...titleRows(reportTitle(template, span, true), join(
          `שנות תקציב ${years.join(", ")} (${yearDates(years[0], start, years[years.length - 1])})`,
          grantsLabel(grants), currencyLabel(everything), EXECUTION,
          `הופק ב-${dateText(today)} מתוך ${everything.length} תנועות`)),
@@ -950,7 +952,7 @@ happens on the viewer's computer; no file is sent anywhere.
         EXECUTION,
         `מתוך ${byYear.get(y).length} תנועות`))),
       transactionsSheet(everything, template),
-      grantsSheet(everything, template, reportTitle(template, span)),
+      grantsSheet(everything, template, reportTitle(template, span, true)),
     ];
   }
 
@@ -1072,7 +1074,7 @@ happens on the viewer's computer; no file is sent anywhere.
     if (!everything.length) throw new ReportError("אין באף אחד מהקבצים תנועות של המענקים שנבחרו.");
     categorize(everything, template);
     const years = [...byYear.keys()].sort((a, b) => a - b);
-    const lines = [summaryTitle(template, `${LTR}${years[0]}–${years[years.length - 1]}${LTR}`),
+    const lines = [summaryTitle(template, `${LTR}${years[0]}–${years[years.length - 1]}${LTR}`, true),
                    ...(grants && grants.size ? [grantsLabel(grants)] : []), "",
                    ...years.map(y => `${y} (${source.get(y)}): ${byYear.get(y).length} תנועות`),
                    "", "בכל השנים יחד:", ...balance(everything, template)];
@@ -1106,7 +1108,8 @@ happens on the viewer's computer; no file is sent anywhere.
     return [...byItem.values()].sort((a, b) => b.count - a.count);
   }
 
-  const summaryTitle = (template, years) => "📊 " + [template.title, template.organization || "", years]
+  const summaryTitle = (template, years, multi = false) => "📊 " + [multi ? template.title_multiyear : template.title,
+    template.organization || "", years]
     .filter(Boolean).join(" – ");
 
   const CURRENCY_SIGNS = {ILS: "₪", NIS: "₪", USD: "$", EUR: "€", GBP: "£"};
