@@ -109,6 +109,7 @@ summary { cursor: pointer; font-weight: 500; }
 .assign { background: var(--surface); border: 1px solid var(--line); border-inline-start: 4px solid var(--unsorted);
   border-radius: 8px; padding: 14px 16px; display: grid; gap: 10px; }
 .warn { background: var(--unsorted); color: var(--ink); border-radius: 6px; padding: 8px 12px; font-size: .9rem; }
+.chip .cur { color: var(--muted); font-size: .8rem; margin-inline-start: 4px; }
 .assign h3 { margin: 0; font-size: 1rem; }
 .assign-list { display: grid; gap: 8px; }
 .assign-row { display: grid; grid-template-columns: 7.5em minmax(0, 1fr) minmax(12em, 16em); gap: 4px 14px; align-items: center;
@@ -173,6 +174,7 @@ summary { cursor: pointer; font-weight: 500; }
       <span class="label">מענקים</span>
       <div class="chips" id="grants"></div>
       <span class="hint" id="grants-hint">בלי סימון: כל המענקים.</span>
+      <div class="warn" id="currency-warning" role="status" hidden></div>
     </div>
 
     <div class="actions">
@@ -188,7 +190,7 @@ summary { cursor: pointer; font-weight: 500; }
     <p class="hint" style="margin-top:10px">סעיף שאינו ברשימה מסומן בצהוב, ומעל הדוח אפשר לבחור לו שורה. סעיפים שמתחילים ב-7 לא נכנסים לדוח. הסכומים הם "סה"כ ביצוע": בפועל ועוד התחייבויות פתוחות (דרישות רכש, הזמנות רכש ושריונים שעוד לא מומשו), כמו בדוח התקציב של SAP. בפועל נספרים רישומים בפועל (סוג ערך 99), חיובים פנימיים (תקורה, תקורת קמפיין, דמי תקשוב, העברה פנימית לשכר, שירותים פנימיים של האוניברסיטה, החזרי מילואים וטלפוניה) והוצאות שהועברו למענק ("העברת הוצאות"). הסבות מענקים בסוף השנה לא נספרות.</p>
   </details>
   <div class="actions" style="margin-top:24px">
-    <span class="hint" id="version">גרסת הדף: 2026-11-01 14:38 UTC · 1529cb6</span>
+    <span class="hint" id="version">גרסת הדף: 2026-11-01 14:40 UTC · f67ddbb</span>
     <span id="update-box" class="actions" hidden>
       <button type="button" id="update-check">בדיקת עדכון</button>
       <span class="hint" id="update-status" role="status"></span>
@@ -643,7 +645,12 @@ happens on the viewer's computer; no file is sent anywhere.
   async function inspect(filename, data, template = DEFAULT_TEMPLATE) {
     const transactions = await readTransactions(filename, data, template);
     const head = transactions.filter(t => t.item === "5000105" && !t.commitment && !t.paper);
-    return {grants: [...new Set(transactions.map(t => t.grant).filter(Boolean))].sort(),
+    const currencies = {};  // grant -> its currency code(s)
+    for (const t of transactions) {
+      if (!t.grant || !t.currency) continue;
+      currencies[t.grant] = [...new Set([...(currencies[t.grant] || []), t.currency])].sort();
+    }
+    return {grants: [...new Set(transactions.map(t => t.grant).filter(Boolean))].sort(), currencies,
             head: {count: head.length, total: 0 - head.reduce((sum, t) => sum + t.amount, 0) + 0}};
   }
 
@@ -1039,6 +1046,7 @@ happens on the viewer's computer; no file is sent anywhere.
     const otherYears = transactions.length - inYear.length;
     inYear = onlyGrants(inYear, grants, filename);
     if (!inYear.length) throw new ReportError(`אין בשנת התקציב ${year} תנועות של המענקים שנבחרו.`);
+    requireOneCurrency(inYear);
     categorize(inYear, template);
     const lines = [summaryTitle(template, String(year)), `שנת תקציב ${year}: ${yearDates(year, start)}`,
                    ...(grants && grants.size ? [grantsLabel(grants)] : []), "", ...balance(inYear, template)];
@@ -1076,6 +1084,7 @@ happens on the viewer's computer; no file is sent anywhere.
     }
     const everything = [...byYear.values()].flat();
     if (!everything.length) throw new ReportError("אין באף אחד מהקבצים תנועות של המענקים שנבחרו.");
+    requireOneCurrency(everything);
     categorize(everything, template);
     const years = [...byYear.keys()].sort((a, b) => a - b);
     const lines = [summaryTitle(template, `${LTR}${years[0]}–${years[years.length - 1]}${LTR}`, true),
@@ -1123,6 +1132,20 @@ happens on the viewer's computer; no file is sent anywhere.
   function currencyOf(transactions) {
     const codes = new Set(transactions.map(t => t.currency).filter(Boolean));
     return codes.size === 1 ? [...codes][0] : codes.size ? "שונים" : "";
+  }
+
+  /** Amounts in different currencies can't be added: the grants of one currency at a time. */
+  function requireOneCurrency(transactions) {
+    const byCurrency = new Map();
+    for (const t of transactions) {
+      if (!t.currency) continue;
+      if (!byCurrency.has(t.currency)) byCurrency.set(t.currency, new Set());
+      if (t.grant) byCurrency.get(t.currency).add(t.grant);
+    }
+    if (byCurrency.size < 2) return;
+    const lines = [...byCurrency].map(([code, grants]) => `${code}: ${[...grants].sort().join(", ") || "ללא מענק"}`);
+    throw new ReportError("בדוח יש כמה מטבעות, ואי אפשר לחבר ביניהם. סמנו מענקים של מטבע אחד, והפיקו דוח נפרד " +
+                          `לכל מטבע. המענקים לפי מטבע: ${lines.join("; ")}.`);
   }
 
   function currencyLabel(transactions) {
@@ -1323,18 +1346,30 @@ async function refreshGrants() {
     try {
       const found = await Report.inspect(f.name, f.data);
       f.grants = found.grants;
+      f.currencies = found.currencies;
       f.head = found.head;
       f.error = "";
     } catch (e) {
       f.grants = [];
+      f.currencies = {};
       f.head = {count: 0, total: 0};
       f.error = e.message;
     }
   }
   const marked = new Set([...document.querySelectorAll("#grants input:checked")].map(i => i.value));
   const all = [...new Set(files.flatMap(f => f.grants))].sort();
+  const currency = {};  // grant -> currency, to show next to it when the files have several
+  for (const f of files) for (const [g, codes] of Object.entries(f.currencies || {})) currency[g] = codes.join("/");
+  const several = new Set(Object.values(currency)).size > 1;
   $("grants").innerHTML = all.map((g, i) =>
-    `<label class="chip"><input type="checkbox" id="grant-${i}" value="${esc(g)}" ${marked.has(g) ? "checked" : ""}> ${esc(g)}</label>`).join("");
+    `<label class="chip"><input type="checkbox" id="grant-${i}" value="${esc(g)}" ${marked.has(g) ? "checked" : ""}> ${esc(g)}${several && currency[g] ? ` <span class="cur">${esc(currency[g])}</span>` : ""}</label>`).join("");
+  $("currency-warning").hidden = !several;
+  if (several) {
+    const by = {};
+    for (const [g, c] of Object.entries(currency)) (by[c] = by[c] || []).push(g);
+    $("currency-warning").textContent = "בקבצים יש כמה מטבעות, ואי אפשר לחבר ביניהם. סמנו מענקים של מטבע אחד, והפיקו " +
+      "דוח נפרד לכל מטבע. " + Object.entries(by).map(([c, gs]) => `${c}: ${gs.sort().join(", ")}`).join("; ") + ".";
+  }
   $("grants-hint").textContent = all.length ? "בלי סימון: כל המענקים. סימון מגביל את הדוח למענקים המסומנים."
     : files.length ? "לא נמצאה עמודת מענק בקובץ, הדוח יהיה על הכל." : "יופיעו כאן אחרי בחירת קובץ.";
 }
