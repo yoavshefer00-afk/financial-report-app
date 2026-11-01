@@ -4,16 +4,20 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-/** The page at `url`, or null when it can't be had in time (no connection, an error, an odd answer). */
-async function fetchLatest(url, {timeout = 4000, fetchImpl = fetch} = {}) {
+/** The page at `url`. Throws an Error saying why when it can't be had in time (no connection, an error
+ * answer, an odd page). */
+async function fetchLatest(url, {timeout = 8000, fetchImpl = fetch} = {}) {
+  let response;
   try {
-    const response = await fetchImpl(url, {signal: AbortSignal.timeout(timeout), cache: "no-store"});
-    if (!response.ok) return null;
-    const text = await response.text();
-    return looksLikePage(text) ? text : null;
+    response = await fetchImpl(url, {signal: AbortSignal.timeout(timeout)});
   } catch (e) {
-    return null;
+    const cause = e && e.cause && e.cause.message ? ` (${e.cause.message})` : "";
+    throw new Error(`אין חיבור לכתובת העדכון: ${e && e.message || e}${cause}`);
   }
+  if (!response.ok) throw new Error(`כתובת העדכון ענתה ${response.status}`);
+  const text = await response.text();
+  if (!looksLikePage(text)) throw new Error("מה שהורד מכתובת העדכון אינו דף של הכלי");
+  return text;
 }
 
 /** A whole page of the tool, not an error page or a cut-off download. */
@@ -35,13 +39,16 @@ function save(cacheFile, text) {
   fs.renameSync(temp, cacheFile);
 }
 
-/** Looks for a newer page; saves it and returns true if there is one. */
+/** Looks for a newer page and saves it. Returns {state: "updated" | "current" | "failed", error?}. */
 async function update(url, cacheFile, bundledFile, options) {
-  const latest = await fetchLatest(url, options);
-  if (!latest) return false;
-  if (latest === read(currentPage(cacheFile, bundledFile))) return false;
-  save(cacheFile, latest);
-  return true;
+  try {
+    const latest = await fetchLatest(url, options);
+    if (latest === read(currentPage(cacheFile, bundledFile))) return {state: "current"};
+    save(cacheFile, latest);
+    return {state: "updated"};
+  } catch (e) {
+    return {state: "failed", error: e.message};
+  }
 }
 
 module.exports = {fetchLatest, looksLikePage, currentPage, save, update};
