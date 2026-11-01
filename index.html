@@ -188,7 +188,7 @@ summary { cursor: pointer; font-weight: 500; }
     <p class="hint" style="margin-top:10px">סעיף שאינו ברשימה מסומן בצהוב, ומעל הדוח אפשר לבחור לו שורה. סעיפים שמתחילים ב-7 לא נכנסים לדוח. הסכומים הם "סה"כ ביצוע": בפועל ועוד התחייבויות פתוחות (דרישות רכש, הזמנות רכש ושריונים שעוד לא מומשו), כמו בדוח התקציב של SAP. בפועל נספרים רישומים בפועל (סוג ערך 99), חיובים פנימיים (תקורה, תקורת קמפיין, דמי תקשוב, העברה פנימית לשכר, שירותים פנימיים של האוניברסיטה, החזרי מילואים וטלפוניה) והוצאות שהועברו למענק ("העברת הוצאות"). הסבות מענקים בסוף השנה לא נספרות.</p>
   </details>
   <div class="actions" style="margin-top:24px">
-    <span class="hint" id="version">גרסת הדף: 2026-11-01 13:21 UTC · 0049bac</span>
+    <span class="hint" id="version">גרסת הדף: 2026-11-01 13:24 UTC · dd137af</span>
     <span id="update-box" class="actions" hidden>
       <button type="button" id="update-check">בדיקת עדכון</button>
       <span class="hint" id="update-status" role="status"></span>
@@ -879,7 +879,7 @@ happens on the viewer's computer; no file is sent anywhere.
                           ...(commitments ? [t.commitment ? "התחייבות" : "בפועל"] : [])],
                  kind: t.sorted ? "transaction" : "unsorted"});
     }
-    return {name: "תנועות", rows, widths: [12, 40, 8, 30, 14, 16, 14, 12], freeze: true, sortable: true};
+    return {name: "תנועות", rows, widths: [12, 40, 8, 30, 14, 16, 14, 12], freeze: true, sortable: {header: 0, footer: 0}};
   }
 
   /** The grants in the report: each one's income and expenses, and its share of the center's. */
@@ -900,6 +900,7 @@ happens on the viewer's computer; no file is sent anywhere.
     const line = (name, sums, kind) => ({values: [name, cents(sums.income), share(sums.income, all.income),
       cents(sums.expenses), share(sums.expenses, all.expenses)], kind, percent: [2, 4]});
     return {name: "מענקים", widths: [24, 16, 18, 16, 18],
+            sortable: {header: 3, footer: 1},  // the header's row, and the rows after the sorted ones (the total)
             rows: [...titleRows(`${title} – לפי מענק`, EXECUTION), {values: [], kind: "blank"},
                    {values: ["מענק", "הכנסות", "% מכלל ההכנסות", "הוצאות", "% מכלל ההוצאות"], kind: "header"},
                    ...[...byGrant].sort((a, b) => a[0].localeCompare(b[0])).map(([grant, sums]) => line(grant, sums, "item")),
@@ -984,7 +985,10 @@ happens on the viewer's computer; no file is sent anywhere.
       });
       s.widths.forEach((w, c) => { sheet.getColumn(c + 1).width = w; });
       // Excel's sort and filter buttons on the header row
-      if (s.sortable) sheet.autoFilter = {from: {row: 1, column: 1}, to: {row: 1, column: s.rows[0].values.length}};
+      if (s.sortable) {
+        sheet.autoFilter = {from: {row: s.sortable.header + 1, column: 1},
+                            to: {row: s.rows.length - s.sortable.footer, column: s.rows[s.sortable.header].values.length}};
+      }
     }
     return new Uint8Array(await book.xlsx.writeBuffer());
   }
@@ -1527,7 +1531,7 @@ function compare(a, b) {
 }
 
 function sortBy(name, c) {
-  sorting = sorting && sorting.c === c ? {c, dir: -sorting.dir} : {c, dir: 1};
+  sorting = sorting && sorting.c === c ? {sheet: name, c, dir: -sorting.dir} : {sheet: name, c, dir: 1};
   renderSheet(name);
   document.querySelector(`.sort[data-c="${c}"]`)?.focus();
 }
@@ -1539,12 +1543,14 @@ function renderSheet(name) {
   const sheet = report.sheets.find(s => s.name === name);
   const width = Math.max(...sheet.rows.map(r => r.values.length));
   let rows = sheet.rows;
+  if (sorting && sorting.sheet !== name) sorting = null;  // each sheet is sorted on its own
   if (sheet.sortable) {
-    const [header, ...body] = rows;
-    if (sorting) {  // stable: equal rows keep the report's (date) order
+    const {header, footer} = sheet.sortable;  // the sorted rows are between the header and the last rows
+    const body = rows.slice(header + 1, rows.length - footer);
+    if (sorting) {  // stable: equal rows keep the report's order
       body.sort((a, b) => sorting.dir * compare(a.values[sorting.c], b.values[sorting.c]));
     }
-    rows = [{...header, sortable: true}, ...body];
+    rows = [...rows.slice(0, header), {...rows[header], sortable: true}, ...body, ...rows.slice(rows.length - footer)];
   }
   $("sheet").innerHTML = rows.map(r => {
     if (r.sortable) {
