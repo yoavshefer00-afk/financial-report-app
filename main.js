@@ -2,7 +2,7 @@
 // the page asks of the network is allowed. On each start it looks for a newer page (a few seconds at most)
 // and uses it; without a connection it uses the last one it had.
 "use strict";
-const {app, BrowserWindow, session, net, dialog} = require("electron");
+const {app, BrowserWindow, session, net, dialog, ipcMain, shell} = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 const {update, currentPage} = require("./update");
@@ -14,6 +14,7 @@ const RECHECK_MS = 2 * 60 * 60 * 1000;
 const smoke = process.argv.includes("--smoke-test");
 
 const bundled = path.join(__dirname, "index.html");
+let win = null;
 const cacheFile = () => path.join(app.getPath("userData"), "page", "index.html");
 
 // The network calls go through Electron's own (Chromium's), which uses the computer's proxy and certificates.
@@ -39,15 +40,31 @@ async function start() {
     callback({cancel: !/^(file|devtools|data|blob):/.test(details.url)});
   });
   pageSession.setPermissionRequestHandler((wc, permission, callback) => callback(false));
+  // A report saved from the page opens in Excel when the save is done.
+  pageSession.on("will-download", (event, item) => {
+    item.once("done", (e, state) => {
+      const file = item.getSavePath();
+      if (state === "completed" && /\.xlsx$/i.test(file)) shell.openPath(file);
+    });
+  });
 
   const first = smoke ? {state: "current"} : await check();
 
-  const win = new BrowserWindow({
+  win = new BrowserWindow({
     width: 1200, height: 900, title: TITLE, autoHideMenuBar: true,
-    webPreferences: {contextIsolation: true, nodeIntegration: false, sandbox: true, session: pageSession},
+    webPreferences: {contextIsolation: true, nodeIntegration: false, sandbox: true, session: pageSession,
+      preload: path.join(__dirname, "preload.js")},
   });
   win.setMenu(null);
   const say = result => win.setTitle(`${TITLE} · ${describe(result)}`);
+  // The page's "בדיקת עדכון" button: look now, and show the newer page if there is one.
+  ipcMain.handle("check-update", async event => {
+    if (!event.senderFrame || !event.senderFrame.url.startsWith("file:")) return null;
+    const result = await check();
+    say(result);
+    if (result.state === "updated") setTimeout(() => win.loadFile(currentPage(cacheFile(), bundled)), 800);
+    return result;
+  });
   win.on("page-title-updated", event => event.preventDefault());  // the title says how the update went
   win.webContents.setWindowOpenHandler(() => ({action: "deny"}));
   win.webContents.on("will-navigate", (event, url) => { if (!url.startsWith("file:")) event.preventDefault(); });
@@ -72,6 +89,7 @@ async function runSmokeTest(win) {
   try {
     const works = await win.webContents.executeJavaScript(`(async () => {
       if (document.getElementById("screen-setup").hidden || !document.getElementById("make")) return false;
+      if (typeof appUpdate.check !== "function" || document.getElementById("update-box").hidden) return false;
       const book = new ExcelJS.Workbook();
       book.addWorksheet("a").addRow([1]);
       return (await book.xlsx.writeBuffer()).byteLength > 1000 && typeof Report.makeReport === "function";

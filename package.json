@@ -12,7 +12,7 @@
   "build": {
     "appId": "il.financial-report",
     "productName": "Financial Report",
-    "files": ["main.js", "update.js", "index.html"],
+    "files": ["main.js", "preload.js", "update.js", "index.html"],
     "win": {"target": "nsis"},
     "nsis": {"oneClick": true, "perMachine": false, "artifactName": "FinancialReport-Setup.exe"},
     "publish": null

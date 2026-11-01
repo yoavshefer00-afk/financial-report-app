@@ -185,7 +185,13 @@ summary { cursor: pointer; font-weight: 500; }
     <div class="map" id="map"></div>
     <p class="hint" style="margin-top:10px">סעיף שאינו ברשימה מסומן בצהוב, ומעל הדוח אפשר לבחור לו שורה. סעיפים שמתחילים ב-7 לא נכנסים לדוח. הסכומים הם "סה"כ ביצוע": בפועל ועוד התחייבויות פתוחות (דרישות רכש, הזמנות רכש ושריונים שעוד לא מומשו), כמו בדוח התקציב של SAP. בפועל נספרים רישומים בפועל (סוג ערך 99), חיובים פנימיים (תקורה, תקורת קמפיין, דמי תקשוב, העברה פנימית לשכר, שירותים פנימיים של האוניברסיטה, החזרי מילואים וטלפוניה) והוצאות שהועברו למענק ("העברת הוצאות"). הסבות מענקים בסוף השנה לא נספרות.</p>
   </details>
-  <p class="hint" id="version" style="margin-top:24px">גרסת הדף: 2026-11-01 12:46 UTC · bc19bc1</p>
+  <div class="actions" style="margin-top:24px">
+    <span class="hint" id="version">גרסת הדף: 2026-11-01 12:53 UTC · 68fb246</span>
+    <span id="update-box" class="actions" hidden>
+      <button type="button" id="update-check">בדיקת עדכון</button>
+      <span class="hint" id="update-status" role="status"></span>
+    </span>
+  </div>
   </div>
 
   <section class="result" id="screen-report" hidden>
@@ -1218,6 +1224,27 @@ function showScreen(name) {
   if (name === "report") $("result-title").focus();
 }
 $("back").addEventListener("click", () => showScreen("setup"));
+
+// In the desktop app (not in a browser) the page can ask the app to look for a newer page.
+if (window.appUpdate) {
+  $("update-box").hidden = false;
+  $("update-check").addEventListener("click", async () => {
+    $("update-check").disabled = true;
+    $("update-status").textContent = "בודק…";
+    try {
+      const result = await window.appUpdate.check();
+      $("update-status").textContent = {
+        current: "זו הגרסה העדכנית.",
+        updated: "נמצאה גרסה חדשה. הדף נטען מחדש…",
+        failed: "לא הצלחתי לבדוק עדכון: " + (result && result.error),
+      }[result && result.state] || "לא הצלחתי לבדוק עדכון.";
+    } catch (e) {
+      $("update-status").textContent = "לא הצלחתי לבדוק עדכון: " + e.message;
+    } finally {
+      $("update-check").disabled = false;
+    }
+  });
+}
 
 // --- files ---
 
