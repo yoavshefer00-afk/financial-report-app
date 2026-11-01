@@ -188,7 +188,7 @@ summary { cursor: pointer; font-weight: 500; }
     <p class="hint" style="margin-top:10px">סעיף שאינו ברשימה מסומן בצהוב, ומעל הדוח אפשר לבחור לו שורה. סעיפים שמתחילים ב-7 לא נכנסים לדוח. הסכומים הם "סה"כ ביצוע": בפועל ועוד התחייבויות פתוחות (דרישות רכש, הזמנות רכש ושריונים שעוד לא מומשו), כמו בדוח התקציב של SAP. בפועל נספרים רישומים בפועל (סוג ערך 99), חיובים פנימיים (תקורה, תקורת קמפיין, דמי תקשוב, העברה פנימית לשכר, שירותים פנימיים של האוניברסיטה, החזרי מילואים וטלפוניה) והוצאות שהועברו למענק ("העברת הוצאות"). הסבות מענקים בסוף השנה לא נספרות.</p>
   </details>
   <div class="actions" style="margin-top:24px">
-    <span class="hint" id="version">גרסת הדף: 2026-11-01 13:04 UTC · a33f238</span>
+    <span class="hint" id="version">גרסת הדף: 2026-11-01 13:21 UTC · 0049bac</span>
     <span id="update-box" class="actions" hidden>
       <button type="button" id="update-check">בדיקת עדכון</button>
       <span class="hint" id="update-status" role="status"></span>
@@ -882,6 +882,30 @@ happens on the viewer's computer; no file is sent anywhere.
     return {name: "תנועות", rows, widths: [12, 40, 8, 30, 14, 16, 14, 12], freeze: true, sortable: true};
   }
 
+  /** The grants in the report: each one's income and expenses, and its share of the center's. */
+  function grantsSheet(transactions, template, title) {
+    const incomeRows = new Set(itemNames(template, "income")), expenseRows = new Set(itemNames(template, "expenses"));
+    const byGrant = new Map();
+    for (const t of transactions) {
+      const grant = t.grant || "ללא מענק";
+      const sums = byGrant.get(grant) || {income: 0, expenses: 0};
+      if (incomeRows.has(t.category)) sums.income += t.amount;
+      else if (expenseRows.has(t.category)) sums.expenses -= t.amount;
+      byGrant.set(grant, sums);
+    }
+    const cents = n => Math.round(n * 100) / 100 + 0;
+    const share = (part, whole) => (whole ? part / whole : null);
+    const all = [...byGrant.values()].reduce((a, b) => ({income: a.income + b.income, expenses: a.expenses + b.expenses}),
+                                             {income: 0, expenses: 0});
+    const line = (name, sums, kind) => ({values: [name, cents(sums.income), share(sums.income, all.income),
+      cents(sums.expenses), share(sums.expenses, all.expenses)], kind, percent: [2, 4]});
+    return {name: "מענקים", widths: [24, 16, 18, 16, 18],
+            rows: [...titleRows(`${title} – לפי מענק`, EXECUTION), {values: [], kind: "blank"},
+                   {values: ["מענק", "הכנסות", "% מכלל ההכנסות", "הוצאות", "% מכלל ההוצאות"], kind: "header"},
+                   ...[...byGrant].sort((a, b) => a[0].localeCompare(b[0])).map(([grant, sums]) => line(grant, sums, "item")),
+                   line('סה"כ', all, "total")]};
+  }
+
   const join = (...parts) => parts.filter(Boolean).join(". ");
   const reportTitle = (template, years) => [template.title, template.organization || "", years].filter(Boolean)
     .join(" – ");
@@ -896,7 +920,7 @@ happens on the viewer's computer; no file is sent anywhere.
     const summary = yearSheet("סיכום", template, totals, title, join(
       `שנת תקציב ${year} (${yearDates(year, start)})`, grantsLabel(grants), currencyLabel(transactions),
       EXECUTION, `הופק ב-${dateText(today)} מתוך ${transactions.length} תנועות`));
-    return [summary, transactionsSheet(transactions, template)];
+    return [summary, transactionsSheet(transactions, template), grantsSheet(transactions, template, title)];
   }
 
   /** The multi-year report: the form with a column per year and a total, each year's form on its
@@ -925,6 +949,7 @@ happens on the viewer's computer; no file is sent anywhere.
         EXECUTION,
         `מתוך ${byYear.get(y).length} תנועות`))),
       transactionsSheet(everything, template),
+      grantsSheet(everything, template, reportTitle(template, span)),
     ];
   }
 
@@ -954,6 +979,7 @@ happens on the viewer's computer; no file is sent anywhere.
               : v;
           }
           style(cell, r.kind, c, v);
+          if (r.percent && r.percent.includes(c) && typeof v === "number") cell.numFmt = "0.0%";
         });
       });
       s.widths.forEach((w, c) => { sheet.getColumn(c + 1).width = w; });
@@ -1537,7 +1563,8 @@ function renderSheet(name) {
       return `<tr class="ratio">${r.values.map(v => typeof v === "number"
         ? `<td class="num">${(v * 100).toFixed(1)}%</td>` : cell(v)).join("")}</tr>`;
     }
-    return `<tr class="${r.kind}">${r.values.map(cell).join("")}</tr>`;
+    return `<tr class="${r.kind}">${r.values.map((v, c) => r.percent && r.percent.includes(c) && typeof v === "number"
+      ? `<td class="num">${(v * 100).toFixed(1)}%</td>` : cell(v)).join("")}</tr>`;
   }).join("");
   $("sheet").querySelectorAll(".sort").forEach(b => b.addEventListener("click", () => sortBy(name, +b.dataset.c)));
 }
